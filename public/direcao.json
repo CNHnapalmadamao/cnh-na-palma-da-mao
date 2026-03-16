@@ -1,0 +1,33 @@
+
+{
+  "subject": "Direção Defensiva",
+  "contentStore": {
+    "Direção Defensiva": {
+      "videos": [],
+      "material": [
+        {
+          "id": "ddm1",
+          "title": "Manual de Direção Defensiva",
+          "url": "https://www.gov.br/infraestrutura/pt-br/assuntos/transito/arquivos-senatran/manual_direcao_defensiva.pdf",
+          "description": "Guia prático sobre como evitar acidentes e lidar com condições adversas.",
+          "content": "Aquaplanagem: Ocorre quando uma camada de água separa o pneu do solo. Atitude: Não freie bruscamente, tire o pé do acelerador e mantenha a direção reta. Condições Adversas: Chuva (reduza velocidade, luz baixa), Neblina (luz baixa, não use farol alto), Vento (abra um pouco as janelas, reduza velocidade). Distância de Seguimento: Regra dos 2 segundos para manter distância segura do veículo à frente."
+        }
+      ],
+      "podcasts": [],
+      "quizz": [
+        {
+          "id": "ddq1",
+          "question": "Em caso de chuva intensa, qual a atitude defensiva correta?",
+          "option1": "Aumentar a velocidade",
+          "option2": "Manter a mesma distância do veículo à frente",
+          "option3": "Reduzir a velocidade e aumentar a distância de segurança",
+          "option4": "Ligar o farol alto",
+          "correct": "C"
+        }
+      ],
+      "flashcards": [
+        { "id": "ddf1", "question": "O que é Aquaplanagem?", "answer": "Perda de aderência do pneu com o solo devido a uma camada de água." }
+      ]
+    }
+  }
+}

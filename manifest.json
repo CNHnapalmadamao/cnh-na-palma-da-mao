@@ -1,0 +1,16 @@
+
+{
+  "isManifest": true,
+  "parts": [
+    "./legislacao.json",
+    "./direcao.json",
+    "./socorros.json",
+    "./mecanica.json",
+    "./ambiente.json",
+    "./infracoes.json",
+    "./crimes.json",
+    "./sinalizacao.json",
+    "./habilitacao.json",
+    "./registro.json"
+  ]
+}

@@ -1,0 +1,25 @@
+
+{
+  "subject": "Mecânica Básica",
+  "contentStore": {
+    "Mecânica Básica": {
+      "videos": [],
+      "material": [],
+      "podcasts": [],
+      "quizz": [
+        {
+          "id": "mq1",
+          "question": "Qual componente é responsável por recarregar a bateria do veículo?",
+          "option1": "Radiador",
+          "option2": "Alternador",
+          "option3": "Carburador",
+          "option4": "Amortecedor",
+          "correct": "B"
+        }
+      ],
+      "flashcards": [
+        { "id": "mf1", "question": "Para que serve o fluido de freio?", "answer": "Transmitir a pressão do pedal para as rodas para parar o veículo." }
+      ]
+    }
+  }
+}
