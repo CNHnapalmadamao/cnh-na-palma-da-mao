@@ -1,0 +1,25 @@
+
+{
+  "subject": "Direção Defensiva",
+  "contentStore": {
+    "Direção Defensiva": {
+      "videos": [],
+      "material": [],
+      "podcasts": [],
+      "quizz": [
+        {
+          "id": "ddq1",
+          "question": "Em caso de chuva intensa, qual a atitude defensiva correta?",
+          "option1": "Aumentar a velocidade",
+          "option2": "Manter a mesma distância do veículo à frente",
+          "option3": "Reduzir a velocidade e aumentar a distância de segurança",
+          "option4": "Ligar o farol alto",
+          "correct": "C"
+        }
+      ],
+      "flashcards": [
+        { "id": "ddf1", "question": "O que é Aquaplanagem?", "answer": "Perda de aderência do pneu com o solo devido a uma camada de água." }
+      ]
+    }
+  }
+}

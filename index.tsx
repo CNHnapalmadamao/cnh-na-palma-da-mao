@@ -5,13 +5,14 @@
 */
 import { GoogleGenAI, Type } from "@google/genai";
 import { DataService, Subject, ContentType, ContentItem } from "./dataService";
-import { loadAllSubjects } from "./src/loaders/subjectLoader";
 
 /** 
  * URL DE DISTRIBUIÇÃO MESTRE:
  * Definido como './manifest.json' para carregar os arquivos locais embutidos no app.
  */
-const MASTER_DISTRIBUTION_URL: string | null = null; 
+const MASTER_DISTRIBUTION_URL: string | null = './manifest.json'; 
+
+const INITIAL_DATA_SEED: any = null; 
 
 // --- CONSTANTS ---
 const STORAGE_LIMIT_MB = 500; 
@@ -42,150 +43,11 @@ const CONTENT_TYPES_CONFIG: Record<ContentType, { name: string; icon: string; fi
 const state = {
     activeBlobUrls: [] as string[],
     isChatOpen: false,
-    theme: localStorage.getItem('theme') || 'light',
 };
 
-// --- SERVICES ---
-const ThemeService = {
-    init() {
-        document.documentElement.setAttribute('data-theme', state.theme);
-    },
-    toggle() {
-        state.theme = state.theme === 'light' ? 'dark' : 'light';
-        localStorage.setItem('theme', state.theme);
-        document.documentElement.setAttribute('data-theme', state.theme);
-    }
-};
-
-const GamificationService = {
-    getPoints(): number {
-        if (!DataService.state.currentUser) return 0;
-        const key = `points_${DataService.state.currentUser.id}`;
-        return parseInt(localStorage.getItem(key) || '0');
-    },
-    addPoints(amount: number) {
-        if (!DataService.state.currentUser) return;
-        const key = `points_${DataService.state.currentUser.id}`;
-        const current = this.getPoints();
-        localStorage.setItem(key, (current + amount).toString());
-    },
-    getLevel(): string {
-        const points = this.getPoints();
-        if (points < 200) return "Condutor Iniciante";
-        if (points < 500) return "Condutor em Treinamento";
-        if (points < 1000) return "Condutor Consciente";
-        return "Mestre do Volante";
-    },
-    recordError(question: any, subject: string, userAnswer: any) {
-        if (!DataService.state.currentUser) return;
-        const key = `errors_${DataService.state.currentUser.id}`;
-        const errors = JSON.parse(localStorage.getItem(key) || '[]');
-        const existingIdx = errors.findIndex((e: any) => e.id === question.id);
-        if (existingIdx > -1) {
-            errors[existingIdx] = { ...question, subject, lastUserAnswer: userAnswer };
-        } else {
-            errors.push({ ...question, subject, lastUserAnswer: userAnswer });
-        }
-        localStorage.setItem(key, JSON.stringify(errors));
-    },
-    getErrors(): any[] {
-        if (!DataService.state.currentUser) return [];
-        const key = `errors_${DataService.state.currentUser.id}`;
-        return JSON.parse(localStorage.getItem(key) || '[]');
-    },
-    removeError(id: string) {
-        if (!DataService.state.currentUser) return;
-        const key = `errors_${DataService.state.currentUser.id}`;
-        const errors = this.getErrors().filter((e: any) => e.id !== id);
-        localStorage.setItem(key, JSON.stringify(errors));
-    }
-};
-
-const SearchService = {
-    async getExplanation(query: string, context: any[]): Promise<string> {
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-            const model = "gemini-3-flash-preview";
-            
-            const contextText = context.map(c => `Matéria: ${c.subject}\nTítulo: ${c.title}\nConteúdo: ${c.text}`).join('\n---\n');
-            
-            const prompt = `Você é o Assistente de Estudo "Sinal Verde" para alunos de autoescola.
-O usuário perguntou: "${query}"
-
-Com base no material didático abaixo, forneça uma explicação clara, didática e resumida (máximo 4 parágrafos) respondendo à pergunta do usuário.
-Se a informação não estiver no material, use seu conhecimento geral sobre o Código de Trânsito Brasileiro (CTB) para explicar, mas mencione que é uma explicação geral.
-
-MATERIAL DIDÁTICO DISPONÍVEL:
-${contextText || "Nenhum material específico encontrado."}
-
-Responda em Português do Brasil.`;
-
-            const response = await ai.models.generateContent({
-                model,
-                contents: [{ parts: [{ text: prompt }] }]
-            });
-            
-            return response.text || "Desculpe, não consegui gerar uma explicação no momento.";
-        } catch (err) {
-            console.error("Erro no Gemini:", err);
-            return "Ocorreu um erro ao tentar explicar o conteúdo. Por favor, tente novamente.";
-        }
-    },
-
-    search(query: string): { title: string; text: string; subject: string }[] {
-        const results: { title: string; text: string; subject: string }[] = [];
-        const normalizedQuery = normalizeText(query);
-        if (!normalizedQuery) return [];
-
-        const queryWords = normalizedQuery.split(/\s+/).filter(w => w.length > 2);
-
-        Object.entries(DataService.state.contentStore).forEach(([subject, content]) => {
-            const materials = content.material || [];
-            materials.forEach(m => {
-                const title = normalizeText(m.title || "");
-                const text = normalizeText(m.text || "");
-                const description = normalizeText(m.description || "");
-                const contentText = normalizeText(m.content || "");
-
-                const combined = `${title} ${text} ${description} ${contentText} ${normalizeText(subject)}`;
-                
-                let score = 0;
-                if (combined.includes(normalizedQuery)) {
-                    score += 10; // Exact phrase match
-                } else {
-                    queryWords.forEach(word => {
-                        if (combined.includes(word)) score += 2;
-                    });
-                }
-
-                if (score > 0) {
-                    results.push({
-                        title: m.title,
-                        text: m.text || m.description || m.content || "Conteúdo disponível no material didático.",
-                        subject: subject,
-                        score: score
-                    } as any);
-                }
-            });
-        });
-        
-        return results.sort((a: any, b: any) => b.score - a.score);
-    }
-};
+const app = document.getElementById('app')!;
 
 // --- HELPERS ---
-function shuffleArray(array: any[]) {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
-}
-
-function normalizeText(text: string): string {
-    return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
 function getSubjectProgress(longName: string): number {
     if (!DataService.state.currentUser) return 0;
     const items = DataService.state.contentStore[longName];
@@ -214,11 +76,16 @@ function showToast(msg: string, type: 'success' | 'error' | 'sync' = 'success') 
 }
 
 function navigateTo(renderFunc: Function, ...args: any[]) {
-    state.activeBlobUrls.forEach(url => URL.revokeObjectURL(url));
-    state.activeBlobUrls = [];
-    app.innerHTML = '';
-    renderFunc(...args);
-    window.scrollTo(0, 0);
+    try {
+        state.activeBlobUrls.forEach(url => URL.revokeObjectURL(url));
+        state.activeBlobUrls = [];
+        app.innerHTML = '';
+        renderFunc(...args);
+        window.scrollTo(0, 0);
+    } catch (err) {
+        console.error("Erro ao navegar/renderizar:", err);
+        showToast("Erro ao carregar tela.", "error");
+    }
 }
 
 async function fileToBase64(file: File): Promise<string> {
@@ -270,7 +137,74 @@ function cleanAiJson(text: string): string {
 }
 
 async function handleAIFullGenerate(subject: Subject) {
-    showToast("A geração de conteúdo via IA (PDF) está desativada no modo 100% offline.", "error");
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'application/pdf';
+    
+    fileInput.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+
+        const loading = document.createElement('div');
+        loading.className = 'loading-overlay';
+        loading.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:4000; display:flex; flex-direction:column; align-items:center; justify-content:center; color:white; font-family:sans-serif; text-align:center; padding:20px;';
+        loading.innerHTML = `
+            <div class="loading-spinner" style="width:60px; height:60px; border:6px solid rgba(255,255,255,0.1); border-top-color:var(--accent-color); border-radius:50%; animation: spin 1s linear infinite; margin-bottom:25px;"></div>
+            <div id="ai-progress-text" style="font-weight:900; font-size:1.2rem; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;">Iniciando Processamento...</div>
+            <div id="ai-sub-text" style="font-size:0.9rem; opacity:0.7; margin-bottom:20px;">Aguarde, a IA está preparando seu material.</div>
+            <div style="width:100%; max-width:300px; height:8px; background:rgba(255,255,255,0.1); border-radius:10px; overflow:hidden;">
+                <div id="ai-progress-bar" style="width:5%; height:100%; background:var(--accent-color); transition:width 0.5s ease-out;"></div>
+            </div>
+        `;
+        document.body.appendChild(loading);
+
+        const updateUI = (text: string, sub: string, pct: number) => {
+            const t = document.getElementById('ai-progress-text');
+            const s = document.getElementById('ai-sub-text');
+            const b = document.getElementById('ai-progress-bar');
+            if(t) t.textContent = text;
+            if(s) s.textContent = sub;
+            if(b) b.style.width = `${pct}%`;
+        };
+
+        try {
+            updateUI("Lendo Documento...", "Extraindo texto do PDF para análise técnica.", 15);
+            const base64Raw = await fileToBase64(file);
+            const base64Data = base64Raw.split(',')[1];
+            
+            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+            const flashSchema = { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { question: { type: Type.STRING }, answer: { type: Type.STRING } }, required: ['question', 'answer'] } };
+            const quizSchema = { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { question: { type: Type.STRING }, option1: { type: Type.STRING }, option2: { type: Type.STRING }, option3: { type: Type.STRING }, option4: { type: Type.STRING }, correct: { type: Type.STRING } }, required: ['question', 'option1', 'option2', 'option3', 'option4', 'correct'] } };
+
+            updateUI("Gerando Flashcards...", "A IA está criando 100 cartões de memorização.", 40);
+            const fRes = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: { parts: [{ text: `Gere exatamente 100 flashcards sobre '${subject.longName}' baseados no PDF.` }, { inlineData: { mimeType: 'application/pdf', data: base64Data } }]},
+                config: { responseMimeType: "application/json", responseSchema: flashSchema }
+            });
+            const fItems = JSON.parse(cleanAiJson(fRes.text || "[]"));
+
+            updateUI("Criando Simulado...", "Gerando 100 questões de múltipla escolha.", 75);
+            const qRes = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: { parts: [{ text: `Gere exatamente 100 questões de quiz sobre '${subject.longName}' baseados no PDF. Campo 'correct' deve ser A, B, C ou D.` }, { inlineData: { mimeType: 'application/pdf', data: base64Data } }]},
+                config: { responseMimeType: "application/json", responseSchema: quizSchema }
+            });
+            const qItems = JSON.parse(cleanAiJson(qRes.text || "[]"));
+
+            for(const item of fItems) await DataService.addContent(subject.longName, 'flashcards', item);
+            for(const item of qItems) await DataService.addContent(subject.longName, 'quizz', item);
+
+            loading.remove();
+            showToast("Material gerado com sucesso!");
+            navigateTo(renderContentEditor, subject);
+        } catch (err) {
+            loading.remove();
+            showToast("Erro na geração.", "error");
+        }
+    };
+    fileInput.click();
 }
 
 async function handleImportBackup() {
@@ -287,10 +221,13 @@ async function handleImportBackup() {
                 const syncToast = showToast("Restaurando sistema...", "sync");
                 await DataService.restoreBackup(data);
                 syncToast.remove();
-                showToast("Backup restaurado com sucesso!");
-                navigateTo(renderHomeScreen);
+                showToast("Backup restaurado com sucesso! Recarregando...");
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
             } catch (err) {
-                showToast("Arquivo de backup inválido.", "error");
+                console.error("Erro no backup:", err);
+                showToast("Erro ao restaurar backup. Verifique o arquivo.", "error");
             }
         };
         reader.readAsText(file);
@@ -331,13 +268,18 @@ async function handleSubjectImport(subject: Subject) {
                 const subjectKey = data.subject || subject.longName;
                 const content = data.contentStore?.[subjectKey];
                 if (content) {
+                    const syncToast = showToast("Importando matéria...", "sync");
                     await DataService.restoreSubjectBackup(subjectKey, content);
-                    showToast(`Conteúdo de ${subject.name} importado!`);
-                    navigateTo(renderAdminDashboard);
+                    syncToast.remove();
+                    showToast(`Conteúdo de ${subject.name} importado! Recarregando...`);
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
                 } else {
                     showToast("Formato de arquivo modular inválido.", "error");
                 }
             } catch (err) {
+                console.error("Erro na importação de matéria:", err);
                 showToast("Erro ao ler JSON.", "error");
             }
         };
@@ -347,27 +289,17 @@ async function handleSubjectImport(subject: Subject) {
 }
 
 // --- RENDERERS ---
-const app = document.getElementById('app')!;
-
 function renderHeader(title: string, backFunc?: Function) {
     const header = document.createElement('header');
     header.innerHTML = `
         <div class="header-container">
-            <h1 style="font-size:1rem; max-width: 50%; font-weight:900; letter-spacing:-0.5px; text-transform: uppercase;">${title}</h1>
+            <h1 style="font-size:1rem; max-width: 60%; font-weight:900; letter-spacing:-0.5px; text-transform: uppercase;">${title}</h1>
             <div class="header-actions">
-                <button id="theme-toggle-btn" class="header-action-btn" aria-label="Alternar Tema"><i class="material-icons">${state.theme === 'light' ? 'dark_mode' : 'light_mode'}</i></button>
-                <button id="search-assistant-btn" class="header-action-btn" aria-label="Assistente de Estudo"><i class="material-icons">psychology</i></button>
                 ${backFunc ? '<button id="back-nav-btn" class="header-action-btn" aria-label="Voltar"><i class="material-icons">arrow_back</i></button>' : ''}
                 <button id="logout-btn" class="header-action-btn" aria-label="Sair"><i class="material-icons">logout</i></button>
             </div>
         </div>
     `;
-    (header.querySelector('#theme-toggle-btn') as HTMLElement).onclick = () => {
-        ThemeService.toggle();
-        const icon = header.querySelector('#theme-toggle-btn i')!;
-        icon.textContent = state.theme === 'light' ? 'dark_mode' : 'light_mode';
-    };
-    (header.querySelector('#search-assistant-btn') as HTMLElement).onclick = () => renderSearchAssistant();
     (header.querySelector('#logout-btn') as HTMLElement).onclick = () => {
         DataService.logout();
         navigateTo(renderLoginScreen);
@@ -434,6 +366,34 @@ function renderLoginScreen() {
     };
 }
 
+// --- GAMIFICATION SERVICE ---
+const GamificationService = {
+    recordError: async (error: any) => {
+        await DataService.recordError(error);
+    },
+    removeError: async (errorId: string) => {
+        await DataService.removeError(errorId);
+    },
+    addPoints: async (points: number) => {
+        await DataService.addPoints(points);
+    }
+};
+
+// --- SIMULADO STATE ---
+let simuladoState = {
+    questions: [] as any[],
+    answers: {} as Record<number, string | number>,
+    currentQuestion: 0,
+    startTime: 0,
+    endTime: 0,
+    timerInterval: null as any,
+    elapsedTime: 0,
+    showFeedback: false,
+    lastSelected: null as string | null
+};
+
+let reviewIndex = 0;
+
 function renderHomeScreen() {
     app.appendChild(renderHeader("CNH na palma da mão"));
     const main = document.createElement('main');
@@ -443,8 +403,8 @@ function renderHomeScreen() {
     subjects.forEach(s => totalProgress += getSubjectProgress(s.longName));
     const avgProgress = Math.round(totalProgress / (subjects.length || 1));
 
-    const points = GamificationService.getPoints();
-    const level = GamificationService.getLevel();
+    const studentErrors = DataService.state.currentUser?.errors?.length || 0;
+    const studentPoints = DataService.state.currentUser?.points || 0;
 
     main.innerHTML = `
         <div class="dashboard-stats">
@@ -454,19 +414,23 @@ function renderHomeScreen() {
                 <div class="stat-bar"><div style="width:${avgProgress}%"></div></div>
             </div>
             <div class="stat-card">
-                <span class="stat-label">Pontuação e Nível</span>
-                <span class="stat-value">${points} pts</span>
-                <span class="stat-label" style="font-size:0.7rem; color:var(--accent-color); font-weight:bold;">${level}</span>
+                <span class="stat-label">Pontos</span>
+                <span class="stat-value">${studentPoints} ⭐</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Perfil Logado</span>
+                <span class="stat-value" style="font-size:0.9rem;">${DataService.state.currentUser?.name || 'Instrutor'}</span>
             </div>
             ${DataService.state.currentUserRole === 'manager' ? '<button id="admin-hub-btn" style="border:none; background:none;"><i class="material-icons" style="color:var(--accent-color)">settings</i></button>' : ''}
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; padding: 0 1rem; margin-bottom: 1.5rem;">
-            <button id="simulado-btn" class="nav-btn" style="background:var(--accent-color); color:white; justify-content:center; font-size:0.8rem;">
-                <i class="material-icons">assignment</i> SIMULADO DETRAN
+        <div class="quick-actions" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:1rem;">
+            <button class="btn btn-primary" id="start-simulado-btn">
+                <i class="material-icons">assignment</i> Simulado
             </button>
-            <button id="review-btn" class="nav-btn" style="background:#f57c00; color:white; justify-content:center; font-size:0.8rem;">
-                <i class="material-icons">history_edu</i> REVISAR ERROS
+            <button class="btn btn-outline" id="review-errors-btn" style="position:relative;">
+                <i class="material-icons">history_edu</i> Revisão
+                ${studentErrors > 0 ? `<span class="badge-count" style="position:absolute; top:-8px; right:-8px;">${studentErrors}</span>` : ''}
             </button>
         </div>
 
@@ -475,15 +439,24 @@ function renderHomeScreen() {
             <input type="text" id="find" placeholder="Qual matéria quer estudar?">
         </div>
         <div class="subject-grid" id="grid"></div>
+        <div class="fab-container">
+            <button class="fab" id="ia-toggle-btn">
+                <div class="sinal-verde-avatar-mini" style="width:24px; height:24px; border:none; box-shadow:none;"></div>
+                Sinal Verde
+            </button>
+        </div>
     `;
     app.appendChild(main);
-
-    (main.querySelector('#simulado-btn') as HTMLElement).onclick = () => startSimulado();
-    (main.querySelector('#review-btn') as HTMLElement).onclick = () => renderReviewScreen();
 
     if (DataService.state.currentUserRole === 'manager') {
         (main.querySelector('#admin-hub-btn') as HTMLElement).onclick = () => navigateTo(renderAdminDashboard);
     }
+
+    (main.querySelector('#start-simulado-btn') as HTMLElement).onclick = () => startSimulado();
+    (main.querySelector('#review-errors-btn') as HTMLElement).onclick = () => {
+        reviewIndex = 0;
+        navigateTo(renderReviewScreen);
+    };
 
     const grid = main.querySelector('#grid')!;
     const draw = (f = "") => {
@@ -508,7 +481,515 @@ function renderHomeScreen() {
         });
     };
     (main.querySelector('#find') as HTMLInputElement).oninput = (e) => draw((e.target as HTMLInputElement).value);
+    (main.querySelector('#ia-toggle-btn') as HTMLElement).onclick = toggleChatbot;
     draw();
+}
+
+function startSimulado() {
+    const allQuestions: any[] = [];
+    Object.entries(DataService.state.contentStore).forEach(([subject, content]) => {
+        if (content.quizz) {
+            content.quizz.forEach(q => allQuestions.push({ ...q, subject }));
+        }
+    });
+
+    if (allQuestions.length < 30) {
+        showToast("Não há questões suficientes para um simulado (mínimo 30).", "error");
+        return;
+    }
+
+    // Embaralhar e pegar 30
+    const shuffled = allQuestions.sort(() => Math.random() - 0.5);
+    
+    if (simuladoState.timerInterval) clearInterval(simuladoState.timerInterval);
+    
+    simuladoState = {
+        questions: shuffled.slice(0, 30),
+        answers: {},
+        currentQuestion: 0,
+        startTime: Date.now(),
+        endTime: 0,
+        timerInterval: setInterval(() => {
+            simuladoState.elapsedTime = Math.floor((Date.now() - simuladoState.startTime) / 1000);
+            const timerEl = document.getElementById('simulado-timer');
+            if (timerEl) {
+                const mins = Math.floor(simuladoState.elapsedTime / 60);
+                const secs = simuladoState.elapsedTime % 60;
+                timerEl.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+        }, 1000),
+        elapsedTime: 0,
+        showFeedback: false,
+        lastSelected: null
+    };
+
+    navigateTo(renderSimuladoScreen);
+}
+
+function renderSimuladoScreen() {
+    app.innerHTML = ''; // Limpar a tela para cada nova questão
+    const header = renderHeader("Simulado DETRAN", () => {
+        if (simuladoState.timerInterval) clearInterval(simuladoState.timerInterval);
+        navigateTo(renderHomeScreen);
+    });
+    
+    // Adicionar cronômetro ao header
+    const timerDiv = document.createElement('div');
+    timerDiv.id = 'simulado-timer';
+    timerDiv.style.cssText = 'font-weight:bold; color:var(--accent-color); background:rgba(255,255,255,0.9); padding:4px 12px; border-radius:20px; font-family:monospace; font-size:1.1rem; box-shadow:0 2px 5px rgba(0,0,0,0.1);';
+    const mins = Math.floor(simuladoState.elapsedTime / 60);
+    const secs = simuladoState.elapsedTime % 60;
+    timerDiv.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    
+    const headerContainer = header.querySelector('.header-container');
+    if (headerContainer) {
+        headerContainer.insertBefore(timerDiv, headerContainer.lastElementChild);
+    }
+    
+    app.appendChild(header);
+
+    const main = document.createElement('main');
+    main.style.padding = '1rem';
+    
+    const q = simuladoState.questions[simuladoState.currentQuestion];
+    const total = simuladoState.questions.length;
+    const current = simuladoState.currentQuestion + 1;
+    const progress = (current / total) * 100;
+
+    main.innerHTML = `
+        <div class="simulado-header" style="margin-bottom:1.5rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
+                <div style="display:flex; flex-direction:column;">
+                    <span style="font-size:0.7rem; font-weight:900; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Questão ${current} de ${total}</span>
+                    <span style="color:var(--accent-color); font-weight:700; font-size:0.9rem;">${q.subject}</span>
+                </div>
+            </div>
+            <div class="stat-bar"><div style="width:${progress}%"></div></div>
+        </div>
+
+        <div class="quiz-card" style="position:relative;">
+            <p style="font-size:1.1rem; font-weight:700; margin-bottom:1.5rem; color:#333; line-height:1.4;">${q.question}</p>
+            <div class="options-list" style="display:flex; flex-direction:column; gap:12px;">
+                ${[1, 2, 3, 4].map(i => {
+                    const optText = q[`option${i}`];
+                    if (!optText) return '';
+                    const letter = ["A", "B", "C", "D"][i - 1];
+                    const isSelected = simuladoState.answers[simuladoState.currentQuestion] === letter;
+                    
+                    // Lógica de feedback visual igual ao quizz
+                    let style = '';
+                    if (isSelected) {
+                        const correct = String(q.correct || "A").trim().toUpperCase();
+                        const isCorrect = letter === correct || (["1","2","3","4"].includes(correct) && i === parseInt(correct));
+                        if (isCorrect) {
+                            style = 'background:#4caf50 !important; color:#fff !important; border-color:#4caf50 !important;';
+                        } else {
+                            style = 'background:#f44336 !important; color:#fff !important; border-color:#f44336 !important;';
+                        }
+                    }
+
+                    return `
+                        <button class="btn btn-outline quiz-option-btn" data-value="${letter}" data-idx="${i-1}" style="text-align:left; padding:1rem; border-radius:var(--border-radius); display:flex; gap:12px; align-items:center; transition:var(--transition); cursor:pointer; ${style}">
+                            <span style="background:rgba(0,0,0,0.05); color:inherit; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:900; flex-shrink:0; font-size:0.9rem;">${letter}</span>
+                            <span style="font-weight:500;">${optText}</span>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+
+        <div class="simulado-nav" style="display:flex; gap:8px; margin-top:1.5rem; align-items: center;">
+            <button class="btn btn-outline" id="prev-q" style="flex:1; padding: 0.8rem 0.4rem; font-size: 0.8rem; ${simuladoState.currentQuestion === 0 ? 'opacity:0.3; cursor:not-allowed;' : ''}" ${simuladoState.currentQuestion === 0 ? 'disabled' : ''}>
+                <i class="material-icons" style="font-size: 1.1rem;">arrow_back</i> Anterior
+            </button>
+            ${simuladoState.currentQuestion === total - 1 
+                ? `<button class="btn btn-primary" id="finish-simulado" style="flex:1.2; padding: 0.8rem 0.4rem; font-size: 0.8rem; background:#2e7d32;">Resultado</button>`
+                : `<button class="btn btn-primary" id="next-q" style="flex:1.2; padding: 0.8rem 0.4rem; font-size: 0.8rem;">Próxima <i class="material-icons" style="font-size: 1.1rem;">arrow_forward</i></button>`
+            }
+            <button class="btn btn-outline" id="encerrar-simulado-btn" style="flex:1; padding: 0.8rem 0.4rem; font-size: 0.8rem; border-color:var(--danger-color); color:var(--danger-color);">
+                <i class="material-icons" style="font-size: 1.1rem;">close</i> Sair
+            </button>
+        </div>
+    `;
+    app.appendChild(main);
+
+    main.querySelectorAll('.quiz-option-btn').forEach(btn => {
+        (btn as HTMLElement).onclick = () => {
+            if (simuladoState.answers[simuladoState.currentQuestion]) return; // Bloqueio após responder
+            const val = (btn as HTMLElement).dataset.value!;
+            simuladoState.answers[simuladoState.currentQuestion] = val;
+            
+            // Feedback visual imediato
+            const correct = String(q.correct || "A").trim().toUpperCase();
+            const isCorrect = val === correct || (["1","2","3","4"].includes(correct) && (["A","B","C","D"].indexOf(val) + 1) === parseInt(correct));
+            
+            if (isCorrect) {
+                (btn as HTMLElement).style.setProperty('background', '#4caf50', 'important');
+                (btn as HTMLElement).style.setProperty('color', '#fff', 'important');
+                showToast("Correto!", "success");
+            } else {
+                (btn as HTMLElement).style.setProperty('background', '#f44336', 'important');
+                (btn as HTMLElement).style.setProperty('color', '#fff', 'important');
+                showToast("Incorreto", "error");
+                
+                // Mostrar a correta
+                const correctIdx = ["A","B","C","D"].includes(correct) ? ["A","B","C","D"].indexOf(correct) : parseInt(correct) - 1;
+                const correctBtn = main.querySelector(`.quiz-option-btn[data-idx="${correctIdx}"]`) as HTMLElement;
+                if (correctBtn) {
+                    correctBtn.style.setProperty('background', '#4caf50', 'important');
+                    correctBtn.style.setProperty('color', '#fff', 'important');
+                }
+            }
+            
+            // Re-renderizar após um pequeno delay para mostrar o feedback ou permitir navegação
+            // O usuário pediu "nova página" como no quizz, mas no quizz o usuário clica em Próxima.
+            // Aqui vamos apenas habilitar visualmente o que for necessário se houver travas.
+        };
+    });
+
+    const encerrarBtn = main.querySelector('#encerrar-simulado-btn') as HTMLButtonElement;
+    if (encerrarBtn) encerrarBtn.onclick = async () => {
+        await finalizeSimulado(true); // true para ir direto para revisão
+    };
+
+    const prevBtn = main.querySelector('#prev-q') as HTMLButtonElement;
+    if (prevBtn) prevBtn.onclick = () => {
+        if (simuladoState.currentQuestion > 0) {
+            simuladoState.currentQuestion--;
+            renderSimuladoScreen();
+        }
+    };
+
+    const nextBtn = main.querySelector('#next-q') as HTMLButtonElement;
+    if (nextBtn) nextBtn.onclick = () => {
+        if (simuladoState.currentQuestion < total - 1) {
+            simuladoState.currentQuestion++;
+            renderSimuladoScreen();
+        }
+    };
+
+    const finishBtn = main.querySelector('#finish-simulado') as HTMLButtonElement;
+    if (finishBtn) finishBtn.onclick = async () => {
+        await finalizeSimulado();
+    };
+}
+
+async function finalizeSimulado(directToReview: boolean = false) {
+    if (simuladoState.timerInterval) clearInterval(simuladoState.timerInterval);
+    simuladoState.endTime = Date.now();
+    const total = simuladoState.questions.length;
+    let correctCount = 0;
+    const errors: any[] = [];
+
+    const letters = ["A", "B", "C", "D"];
+    const numbers = ["1", "2", "3", "4"];
+
+    simuladoState.questions.forEach((q, idx) => {
+        const userAns = simuladoState.answers[idx];
+        const correct = q.correct;
+        
+        let correctIdx = -1;
+        if (typeof correct === 'string') {
+            const upper = correct.toUpperCase();
+            if (letters.includes(upper)) correctIdx = letters.indexOf(upper);
+            else if (numbers.includes(upper)) correctIdx = numbers.indexOf(upper);
+        } else if (typeof correct === 'number') {
+            correctIdx = correct - 1;
+        }
+
+        let userIdx = -1;
+        if (typeof userAns === 'string') {
+            userIdx = letters.indexOf(userAns.toUpperCase());
+        } else if (typeof userAns === 'number') {
+            userIdx = userAns - 1;
+        }
+
+        if (userIdx === correctIdx && correctIdx !== -1) {
+            correctCount++;
+        } else {
+            const correctLetter = letters[correctIdx] || correct;
+            const correctText = q[`option${correctIdx + 1}`] || "N/A";
+            const userLetter = letters[userIdx] || userAns || "N/A";
+            const userText = userIdx !== -1 ? q[`option${userIdx + 1}`] : "Não respondida";
+
+            errors.push({
+                id: q.id,
+                question: q.question,
+                options: [q.option1, q.option2, q.option3, q.option4],
+                correct: correctLetter,
+                correctText: correctText,
+                userAnswer: userLetter,
+                userAnswerText: userText,
+                subject: q.subject
+            });
+        }
+    });
+
+    const percent = Math.round((correctCount / total) * 100);
+    const approved = percent >= 70;
+
+    // Registrar erros
+    for (const err of errors) {
+        await GamificationService.recordError(err);
+    }
+
+    // Adicionar pontos se aprovado
+    if (approved) {
+        await GamificationService.addPoints(50);
+    }
+
+    if (directToReview) {
+        reviewIndex = 0;
+        navigateTo(renderReviewScreen, errors);
+    } else {
+        renderSimuladoResult(correctCount, total, percent, approved, errors);
+    }
+}
+
+function renderSimuladoResult(correct: number, total: number, percent: number, approved: boolean, errors: any[]) {
+    app.appendChild(renderHeader("Resultado do Simulado", () => navigateTo(renderHomeScreen)));
+    const main = document.createElement('main');
+    main.style.padding = '1.5rem';
+    main.style.textAlign = 'center';
+
+    const totalSeconds = Math.floor((simuladoState.endTime - simuladoState.startTime) / 1000);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    main.innerHTML = `
+        <div class="result-card" style="background:white; padding:2.5rem 1.5rem; border-radius:var(--border-radius); box-shadow:var(--shadow); margin-bottom:2rem; border:1px solid #f0f4f4;">
+            <div style="margin-bottom:1.5rem;">
+                <i class="material-icons" style="font-size:5rem; color:${approved ? '#2e7d32' : 'var(--danger-color)'};">
+                    ${approved ? 'check_circle' : 'error'}
+                </i>
+            </div>
+            <h2 style="font-size:1.8rem; font-weight:900; margin-bottom:0.5rem; color:#333;">${approved ? 'Parabéns, aprovado!' : 'Precisa revisar mais'}</h2>
+            <p style="color:#666; margin-bottom:2rem; font-weight:500;">Você atingiu ${percent}% de aproveitamento.</p>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:2rem;">
+                <div class="stat-card" style="background:#f8fbfb; padding:1rem; border-radius:16px; border:1px solid #eef2f2;">
+                    <span class="stat-label">Acertos</span>
+                    <span class="stat-value" style="color:#2e7d32;">${correct}</span>
+                </div>
+                <div class="stat-card" style="background:#f8fbfb; padding:1rem; border-radius:16px; border:1px solid #eef2f2;">
+                    <span class="stat-label">Erros</span>
+                    <span class="stat-value" style="color:var(--danger-color);">${errors.length}</span>
+                </div>
+                <div class="stat-card" style="background:#f8fbfb; padding:1rem; border-radius:16px; border:1px solid #eef2f2;">
+                    <span class="stat-label">Tempo Gasto</span>
+                    <span class="stat-value">${timeStr}</span>
+                </div>
+                <div class="stat-card" style="background:#f8fbfb; padding:1rem; border-radius:16px; border:1px solid #eef2f2;">
+                    <span class="stat-label">Status</span>
+                    <span class="stat-value" style="color:${approved ? '#2e7d32' : 'var(--danger-color)'}; font-size:1rem;">${approved ? 'APROVADO' : 'REPROVADO'}</span>
+                </div>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <button class="btn btn-primary" id="retry-simulado" style="width:100%;">
+                    <i class="material-icons">restart_alt</i> Refazer Simulado
+                </button>
+                <button class="btn btn-outline" id="go-review" style="width:100%;">
+                    <i class="material-icons">history_edu</i> Revisar Erros
+                </button>
+            </div>
+        </div>
+    `;
+    app.appendChild(main);
+
+    (main.querySelector('#retry-simulado') as HTMLElement).onclick = () => startSimulado();
+    (main.querySelector('#go-review') as HTMLElement).onclick = () => {
+        reviewIndex = 0;
+        navigateTo(renderReviewScreen, errors);
+    };
+}
+
+function renderReviewScreen(customErrors?: any[]) {
+    app.appendChild(renderHeader("Revisão de Erros", () => {
+        reviewIndex = 0;
+        navigateTo(renderHomeScreen);
+    }));
+    const main = document.createElement('main');
+    main.style.padding = '1rem';
+
+    const errors = customErrors || DataService.state.currentUser?.errors || [];
+
+    if (errors.length === 0) {
+        main.innerHTML = `
+            <div style="text-align:center; padding:3rem 1rem;">
+                <i class="material-icons" style="font-size:4rem; color:#ccc; margin-bottom:1rem;">task_alt</i>
+                <h3>Nenhum erro registrado!</h3>
+                <p style="color:#666;">Continue assim. Seus erros aparecerão aqui para revisão.</p>
+                <button class="btn btn-primary" style="margin-top:1.5rem;" onclick="navigateTo(renderHomeScreen)">Voltar ao Início</button>
+            </div>
+        `;
+    } else {
+        if (reviewIndex >= errors.length) reviewIndex = errors.length - 1;
+        if (reviewIndex < 0) reviewIndex = 0;
+
+        const err = errors[reviewIndex];
+
+        main.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; padding:0 0.5rem;">
+                <span style="color:#666; font-size:0.85rem; font-weight:bold;">Questão ${reviewIndex + 1} de ${errors.length}</span>
+                <span style="background:var(--danger-color); color:white; padding:2px 8px; border-radius:10px; font-size:0.7rem; font-weight:bold; text-transform:uppercase;">Erro</span>
+            </div>
+
+            <div class="quiz-card" style="padding:0; overflow:hidden; margin-bottom:1.5rem;">
+                <div style="background:#f8fbfb; padding:0.75rem 1rem; font-size:0.75rem; font-weight:900; color:#888; display:flex; justify-content:space-between; border-bottom:1px solid #f0f4f4; text-transform:uppercase; letter-spacing:0.5px;">
+                    <span>${err.subject}</span>
+                </div>
+                <div style="padding:1.25rem;">
+                    <p style="font-weight:700; margin-bottom:1.25rem; color:#333; line-height:1.4;">${err.question}</p>
+                    <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:1.5rem;">
+                        <div style="color:var(--danger-color); background:#fff5f5; padding:1rem; border-radius:12px; border:1px solid #ffe3e3; font-size:0.85rem;">
+                            <div style="font-size:0.7rem; font-weight:900; opacity:0.6; margin-bottom:6px; text-transform:uppercase;">Sua Resposta (${err.userAnswer})</div>
+                            <div style="font-weight:700;">${err.userAnswerText || err.userAnswer}</div>
+                        </div>
+                        <div style="color:#2e7d32; background:#f0f9f8; padding:1rem; border-radius:12px; border:1px solid #e0f2f1; font-size:0.85rem;">
+                            <div style="font-size:0.7rem; font-weight:900; opacity:0.6; margin-bottom:6px; text-transform:uppercase;">Resposta Correta (${err.correct})</div>
+                            <div style="font-weight:700;">${err.correctText || err.correct}</div>
+                        </div>
+                    </div>
+
+                    <div id="ai-explanation-box" style="margin-bottom:1.5rem; display:none;">
+                        <div style="background:#f0f4f4; border-radius:12px; padding:1rem; border:1px solid #e0e8e8; position:relative;">
+                            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; color:var(--accent-color);">
+                                <i class="material-icons" style="font-size:1.2rem;">psychology</i>
+                                <span style="font-weight:900; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px;">Explicação Sinal Verde</span>
+                            </div>
+                            <div id="ai-explanation-text" style="font-size:0.85rem; line-height:1.5; color:#444;"></div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-outline" id="why-btn" style="flex:1; padding:0.6rem; font-size:0.75rem; min-width:80px;">
+                            <i class="material-icons" style="font-size:1rem;">psychology</i> POR QUÊ?
+                        </button>
+                        <button class="btn btn-outline" id="material-btn" style="flex:1; padding:0.6rem; font-size:0.75rem; min-width:80px;">
+                            <i class="material-icons" style="font-size:1rem;">menu_book</i> MATERIAL
+                        </button>
+                        <button class="btn btn-primary" id="redo-btn" style="flex:1; padding:0.6rem; font-size:0.75rem; min-width:80px;">
+                            <i class="material-icons" style="font-size:1rem;">restart_alt</i> REFAZER
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="review-nav" style="display:flex; gap:12px; margin-top:1rem;">
+                <button class="btn btn-outline" id="prev-error" style="flex:1; ${reviewIndex === 0 ? 'opacity:0.3; cursor:not-allowed;' : ''}" ${reviewIndex === 0 ? 'disabled' : ''}>
+                    <i class="material-icons">chevron_left</i> Anterior
+                </button>
+                <button class="btn btn-outline" id="next-error" style="flex:1; ${reviewIndex === errors.length - 1 ? 'opacity:0.3; cursor:not-allowed;' : ''}" ${reviewIndex === errors.length - 1 ? 'disabled' : ''}>
+                    Próxima <i class="material-icons">chevron_right</i>
+                </button>
+            </div>
+        `;
+
+        const whyBtn = main.querySelector('#why-btn') as HTMLElement;
+        const aiBox = main.querySelector('#ai-explanation-box') as HTMLElement;
+        const aiText = main.querySelector('#ai-explanation-text') as HTMLElement;
+
+        whyBtn.onclick = async () => {
+            if (aiBox.style.display === 'block') {
+                aiBox.style.display = 'none';
+                return;
+            }
+            
+            aiBox.style.display = 'block';
+            
+            if (err.aiExplanation) {
+                aiText.innerHTML = err.aiExplanation;
+                return;
+            }
+
+            aiText.innerHTML = '<div style="display:flex; gap:4px; padding:10px 0;"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+            
+            const prompt = `Explique por que a resposta correta para a pergunta "${err.question}" é "${err.correctText || err.correct}" e por que a opção "${err.userAnswerText || err.userAnswer}" está incorreta. Use o contexto da matéria ${err.subject}. Seja conciso e direto.`;
+            
+            try {
+                const response = await askSinalVerde(prompt, 'explanation');
+                err.aiExplanation = response;
+                aiText.innerHTML = response;
+            } catch (error) {
+                aiText.innerHTML = "Erro ao carregar explicação. Tente novamente.";
+            }
+        };
+
+        (main.querySelector('#material-btn') as HTMLElement).onclick = () => {
+            const subject = getAllSubjects().find(s => s.longName === err.subject);
+            if (subject) navigateTo(renderStudyScreen, subject);
+        };
+
+        (main.querySelector('#redo-btn') as HTMLElement).onclick = () => renderRedoModal(err);
+
+        (main.querySelector('#prev-error') as HTMLElement).onclick = () => {
+            if (reviewIndex > 0) {
+                reviewIndex--;
+                navigateTo(renderReviewScreen, customErrors);
+            }
+        };
+
+        (main.querySelector('#next-error') as HTMLElement).onclick = () => {
+            if (reviewIndex < errors.length - 1) {
+                reviewIndex++;
+                navigateTo(renderReviewScreen, customErrors);
+            }
+        };
+    }
+    app.appendChild(main);
+}
+
+function renderRedoModal(err: any) {
+    const modal = document.createElement('div');
+    modal.className = 'chat-overlay';
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.background = 'rgba(0,0,0,0.6)';
+    modal.style.backdropFilter = 'blur(4px)';
+    
+    modal.innerHTML = `
+        <div class="quiz-card" style="width:90%; max-width:420px; padding:2rem; margin:0; animation: fadeInUp 0.3s ease-out;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:1.5rem; color:var(--accent-color);">
+                <i class="material-icons">restart_alt</i>
+                <h3 style="font-weight:900; text-transform:uppercase; font-size:1rem; letter-spacing:0.5px;">Refazer Questão</h3>
+            </div>
+            <p style="margin-bottom:1.5rem; font-weight:700; color:#333; line-height:1.4;">${err.question}</p>
+            <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:2rem;">
+                ${err.options.map((opt: string, i: number) => {
+                    const letter = ["A", "B", "C", "D"][i];
+                    return `
+                        <button class="option-btn redo-opt" data-val="${letter}" style="text-align:left; padding:1rem; border:2px solid #eee; border-radius:var(--border-radius); background:white; display:flex; gap:12px; align-items:center; transition:var(--transition); cursor:pointer;">
+                            <span style="background:#eee; color:#666; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:900; flex-shrink:0; font-size:0.9rem;">${letter}</span>
+                            <span style="font-weight:500; color:#333;">${opt}</span>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+            <button class="btn btn-outline" style="width:100%; border-color:#eee; color:#888;" id="cancel-redo">Cancelar</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelectorAll('.redo-opt').forEach(btn => {
+        (btn as HTMLElement).onclick = async () => {
+            const val = (btn as HTMLElement).dataset.val!;
+            if (val === err.correct) {
+                showToast("Correto!", "success");
+                await GamificationService.removeError(err.id);
+                await GamificationService.addPoints(10);
+                modal.remove();
+                navigateTo(renderReviewScreen);
+            } else {
+                showToast("Resposta incorreta", "error");
+                modal.remove();
+            }
+        };
+    });
+
+    (modal.querySelector('#cancel-redo') as HTMLElement).onclick = () => modal.remove();
 }
 
 function renderStudyScreen(subject: Subject) {
@@ -581,9 +1062,7 @@ function renderTabContentToPane(subject: Subject, type: ContentType, box: HTMLEl
                 ans = !ans; 
                 card.querySelector('.flashcard-face')!.textContent = ans ? item.answer : item.question; 
                 card.style.background = ans ? '#f0f9f8' : '#fff'; 
-                if (!ans) return; // Only count when showing answer
-                const isNew = await DataService.updateProgress(subject.longName, item.id); 
-                if (isNew !== false) GamificationService.addPoints(5);
+                await DataService.updateProgress(subject.longName, item.id); 
             };
             (box.querySelector('#prev') as HTMLElement).onclick = () => { if(i>0){i--; show();} };
             (box.querySelector('#next') as HTMLElement).onclick = () => { if(i<items.length-1){i++; show();} };
@@ -635,19 +1114,53 @@ function renderTabContentToPane(subject: Subject, type: ContentType, box: HTMLEl
                 if (selectedIdx === correctIdx) {
                     target.style.setProperty('background', '#4caf50', 'important');
                     target.style.setProperty('color', '#fff', 'important');
-                    const isNew = !DataService.state.currentUser?.progress[subject.longName]?.completed.includes(q.id);
                     await DataService.updateProgress(subject.longName, q.id);
-                    if (isNew) GamificationService.addPoints(10);
+                    await GamificationService.addPoints(5);
                     showToast("Correto!", "success");
                 } else {
                     target.style.setProperty('background', '#f44336', 'important');
                     target.style.setProperty('color', '#fff', 'important');
-                    GamificationService.recordError(q, subject.longName);
                     if (correctIdx !== -1) {
                         const cBtn = box.querySelector(`.quiz-option-btn[data-idx="${correctIdx}"]`) as HTMLElement;
                         if(cBtn) cBtn.style.setProperty('background', '#4caf50', 'important');
                     }
+                    
+                    // Registrar erro
+                    await GamificationService.recordError({
+                        id: q.id,
+                        question: q.question,
+                        options: [q.option1, q.option2, q.option3, q.option4],
+                        correct: letters[correctIdx] || q.correct,
+                        userAnswer: letters[selectedIdx],
+                        subject: subject.name
+                    });
+
                     showToast("Resposta incorreta", "error");
+                    const explainBtn = document.createElement('button');
+                    explainBtn.className = 'nav-btn';
+                    explainBtn.style.cssText = 'background:var(--accent-color); color:white; margin-top:10px; font-size:0.7rem; width:100%; justify-content:center;';
+                    explainBtn.innerHTML = '<i class="material-icons">psychology</i> Explicar com Sinal Verde';
+                    explainBtn.onclick = async () => {
+                        toggleChatbot();
+                        const chatOverlay = document.querySelector('.chat-overlay') as HTMLElement;
+                        const msgs = chatOverlay.querySelector('#msgs')!;
+                        const prompt = `O aluno errou a seguinte questão de ${subject.name}: "${q.question}". A resposta correta era "${q['option'+(correctIdx+1)]}". Explique o motivo e dê uma dica de memorização.`;
+                        
+                        msgs.innerHTML += `<div class="chat-message user-message">Pode me explicar essa questão?</div>`;
+                        msgs.scrollTop = msgs.scrollHeight;
+
+                        const loadingMsg = document.createElement('div');
+                        loadingMsg.className = 'chat-message ai-message typing';
+                        loadingMsg.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+                        msgs.appendChild(loadingMsg);
+                        msgs.scrollTop = msgs.scrollHeight;
+
+                        const response = await askSinalVerde(prompt, 'correction');
+                        loadingMsg.remove();
+                        msgs.innerHTML += `<div class="chat-message ai-message">${response}</div>`;
+                        msgs.scrollTop = msgs.scrollHeight;
+                    };
+                    target.parentElement?.appendChild(explainBtn);
                 }
             });
 
@@ -740,9 +1253,13 @@ function renderAdminDashboard() {
                 </div>
             </div>
 
-            <div class="admin-section" style="margin-top:20px; border-left: 4px solid #ccc; opacity: 0.5; pointer-events: none;">
-                <h3 style="margin-bottom:1rem; font-size:0.8rem; font-weight:900; color:#888; text-transform:uppercase;">Distribuição Cloud (Desativado)</h3>
-                <p style="font-size:0.75rem; color:#666; margin-bottom:10px;">O app está configurado para modo 100% offline.</p>
+            <div class="admin-section" style="margin-top:20px; border-left: 4px solid var(--accent-color);">
+                <h3 style="margin-bottom:1rem; font-size:0.8rem; font-weight:900; color:#888; text-transform:uppercase;">URL de Distribuição Cloud</h3>
+                <p style="font-size:0.75rem; color:#666; margin-bottom:10px;">Link para manifesto.json ou backup mestre.</p>
+                <div style="display:flex; gap:10px;">
+                    <input type="text" id="remote-url-input" placeholder="Link Gist Raw" value="${DataService.state.remoteJsonUrl || MASTER_DISTRIBUTION_URL || ''}">
+                    <button id="save-remote-url" class="nav-btn" style="padding:0.5rem 1rem; background:var(--accent-color); color:white;">SALVAR</button>
+                </div>
             </div>
 
             <h3 style="margin:2rem 0 1rem; font-size:1rem; font-weight:900;">Gerenciar Matérias Individuais</h3>
@@ -754,14 +1271,10 @@ function renderAdminDashboard() {
     (main.querySelector('#save-remote-url') as HTMLElement).onclick = async () => {
         const input = main.querySelector('#remote-url-input') as HTMLInputElement;
         const syncToast = showToast("Sincronizando...", "sync");
-        const success = await DataService.setRemoteUrl(input.value.trim());
+        await DataService.setRemoteUrl(input.value.trim());
         syncToast.remove();
-        if (success) {
-            showToast("Link de distribuição salvo!");
-            navigateTo(renderHomeScreen);
-        } else {
-            showToast("Falha ao sincronizar com a URL fornecida.", "error");
-        }
+        showToast("Link de distribuição salvo!");
+        navigateTo(renderAdminDashboard);
     };
 
     (main.querySelector('#backup-btn') as HTMLElement).onclick = async () => {
@@ -799,10 +1312,10 @@ function renderContentEditor(subject: Subject) {
     app.appendChild(renderHeader(subject.name, () => navigateTo(renderAdminDashboard)));
     const main = document.createElement('main');
     main.innerHTML = `
-        <div class="admin-section" style="margin:1rem; border: 2px dashed #ccc; text-align:center; opacity: 0.5;">
-            <i class="material-icons" style="font-size:2rem; color:#888;">auto_awesome</i>
-            <h4 style="font-weight:900; color:#888;">IA: Gerar conteúdo (Desativado)</h4>
-            <p style="font-size:0.7rem; color:#666;">A geração via PDF exige conexão com a nuvem.</p>
+        <div class="admin-section" style="margin:1rem; border: 2px dashed var(--accent-color); text-align:center;">
+            <i class="material-icons" style="font-size:2rem; color:var(--accent-color);">auto_awesome</i>
+            <h4 style="font-weight:900;">IA: Gerar conteúdo</h4>
+            <button id="ai-full-gen" class="nav-btn" style="width:100%; background:var(--accent-color); color:white; justify-content:center;">LER PDF</button>
         </div>
         <div class="tabs">
             ${Object.entries(CONTENT_TYPES_CONFIG).map(([id, c]) => `<button class="tab-button" data-type="${id}">${c.name}</button>`).join('')}
@@ -849,339 +1362,137 @@ function renderContentEditor(subject: Subject) {
     (tabs[0] as HTMLElement).click();
 }
 
-function renderSearchAssistant() {
-    const overlay = document.createElement('div');
-    overlay.className = 'chat-overlay';
-    overlay.style.background = 'rgba(0,0,0,0.5)';
-    overlay.innerHTML = `
-        <div class="chat-container" style="bottom: 50%; right: 50%; transform: translate(50%, 50%); height: 80vh; width: 90vw; max-width: 500px;">
-            <div class="chat-header">
-                <span style="font-weight:900;"><i class="material-icons" style="vertical-align:middle; margin-right:5px;">psychology</i> Assistente de Estudo</span>
-                <button id="close-chat" style="background:none; border:none; color:white;"><i class="material-icons">close</i></button>
-            </div>
-            <div class="chat-messages" id="search-results" style="background:var(--primary-bg);">
-                <div class="ai-message chat-message">Olá! Eu sou seu assistente offline. O que você gostaria de pesquisar no material didático?</div>
-            </div>
-            <div class="chat-input-form">
-                <form id="search-form" class="chat-input-wrapper">
-                    <input type="text" id="search-input" placeholder="Ex: Regras de ultrapassagem..." style="flex:1;">
-                    <button type="submit" class="nav-btn" style="background:var(--accent-color); color:white; padding:10px;"><i class="material-icons">search</i></button>
-                </form>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
+const SINAL_VERDE_SYSTEM_PROMPT = `
+Você é a "Sinal Verde", a assistente virtual do aplicativo "CNH na Palma da Mão".
+Sua missão é ajudar alunos a passarem na prova do DETRAN de forma leve e eficiente.
 
-    const close = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-    overlay.querySelector('#close-chat')!.onclick = close;
+PERSONALIDADE:
+- Didática: Explique como um instrutor de autoescola experiente.
+- Amigável: Use linguagem simples, acolhedora e emojis de trânsito (🚦, 🚗, 🛑, ✅).
+- Motivadora: Incentive o progresso do aluno.
+- Objetiva: Respostas claras e diretas.
 
-    const resultsBox = overlay.querySelector('#search-results')!;
-    (overlay.querySelector('#search-form') as HTMLFormElement).onsubmit = async (e) => {
-        e.preventDefault();
-        const input = overlay.querySelector('#search-input') as HTMLInputElement;
-        const query = input.value;
-        if (!query) return;
+COMPORTAMENTO:
+1. EXPLICAÇÃO: Se o aluno perguntar sobre conteúdo, explique em até 4 parágrafos curtos. Use exemplos práticos e cite o CTB (Código de Trânsito Brasileiro) quando relevante.
+2. CORREÇÃO: Se o aluno errar uma questão, mostre a resposta correta, explique o "porquê" e dê uma dica de memorização (mnemônico).
+3. INCENTIVO: Comemore acertos com frases curtas como "Boa! Você está evoluindo 🚦".
+4. BUSCA: Se o aluno pesquisar algo, resuma os pontos principais e sugira o próximo passo de estudo.
 
-        resultsBox.innerHTML += `<div class="user-message chat-message">${query}</div>`;
-        const results = SearchService.search(query);
-        
-        const loadingMsg = document.createElement('div');
-        loadingMsg.className = "ai-message chat-message";
-        loadingMsg.innerHTML = `<i class="material-icons spin">sync</i> Analisando material e preparando explicação...`;
-        resultsBox.appendChild(loadingMsg);
-        resultsBox.scrollTop = resultsBox.scrollHeight;
+EVITE:
+- Linguagem robótica ou excessivamente formal.
+- Respostas muito longas.
+- Termos técnicos sem explicação simples.
 
-        const explanation = await SearchService.getExplanation(query, results);
-        loadingMsg.remove();
+IDENTIDADE VISUAL:
+Você é um robô simpático, com cores verde, amarelo e branco, e um grande semáforo verde no peito que brilha quando você está feliz ou explicando algo.
+`;
 
-        resultsBox.innerHTML += `
-            <div class="ai-message chat-message" style="background: var(--card-bg); border-left: 4px solid var(--accent-color);">
-                <div class="markdown-body" style="font-size:0.9rem; line-height:1.5;">
-                    ${explanation.replace(/\n/g, '<br>')}
-                </div>
-                ${results.length > 0 ? `
-                    <div style="margin-top:15px; padding-top:10px; border-top:1px solid rgba(0,0,0,0.1);">
-                        <p style="font-size:0.7rem; font-weight:bold; opacity:0.7; margin-bottom:5px;">FONTES ENCONTRADAS NO MATERIAL:</p>
-                        ${results.slice(0, 2).map(res => `
-                            <div style="font-size:0.75rem; margin-bottom:5px;">
-                                <span style="color:var(--accent-color); font-weight:bold;">[${res.subject}]</span> ${res.title}
-                            </div>
-                        `).join('')}
-                    </div>
-                ` : ''}
-            </div>
-        `;
-
-        input.value = "";
-        resultsBox.scrollTop = resultsBox.scrollHeight;
-    };
-}
-
-let simuladoState = {
-  questions: [] as any[],
-  answers: {} as Record<number, any>,
-  currentQuestion: 0
-};
-
-function startSimulado() {
-    const allQuizzes: any[] = [];
-    Object.entries(DataService.state.contentStore).forEach(([subject, content]) => {
-        if (content.quizz) {
-            content.quizz.forEach(q => allQuizzes.push({ ...q, subject }));
-        }
-    });
-
-    if (allQuizzes.length < 30) {
-        showToast("É necessário pelo menos 30 questões cadastradas para iniciar o simulado.", "error");
-        return;
-    }
-
-    shuffleArray(allQuizzes);
-
-    simuladoState = {
-        questions: allQuizzes.slice(0, 30),
-        answers: {},
-        currentQuestion: 0
-    };
-
-    renderSimuladoQuestion();
-}
-
-function renderSimuladoQuestion() {
-    app.innerHTML = "";
-    app.appendChild(renderHeader(`Simulado - Questão ${simuladoState.currentQuestion + 1}/30`, () => {
-        if(confirm("Deseja cancelar o simulado?")) navigateTo(renderHomeScreen);
-    }));
-
-    const q = simuladoState.questions[simuladoState.currentQuestion];
-    const main = document.createElement('main');
-    app.appendChild(main);
-
-    const letters = ["A", "B", "C", "D"];
-
-    main.innerHTML = `
-        <div class="quiz-card" style="padding:1.5rem;">
-            <p style="font-weight:bold; margin-bottom:1.5rem; font-size:1.1rem;">${q.question}</p>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-                ${[1, 2, 3, 4].map(n => `
-                    <button class="quiz-option-btn nav-btn ${simuladoState.answers[simuladoState.currentQuestion] === letters[n-1] ? 'active-simulado' : ''}" data-value="${letters[n-1]}">
-                        <span style="font-weight:bold; margin-right:10px;">${letters[n-1]})</span> ${q['option'+n]}
-                    </button>
-                `).join('')}
-            </div>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:2rem; padding:0 1rem;">
-            <button id="prev-q" class="nav-btn" ${simuladoState.currentQuestion === 0 ? 'disabled' : ''}>Anterior</button>
-            <button id="finish-sim" class="nav-btn" style="background:var(--danger-color); color:white;">FINALIZAR</button>
-            <button id="next-q" class="nav-btn" ${simuladoState.currentQuestion === 29 ? 'disabled' : ''}>Próxima</button>
-        </div>
-    `;
-
-    main.querySelectorAll('.quiz-option-btn').forEach(btn => btn.onclick = (e) => {
-        const val = (e.currentTarget as HTMLElement).getAttribute('data-value');
-        simuladoState.answers[simuladoState.currentQuestion] = val;
-        // Visual feedback immediate
-        main.querySelectorAll('.quiz-option-btn').forEach(b => b.classList.remove('active-simulado'));
-        (e.currentTarget as HTMLElement).classList.add('active-simulado');
-        // Small delay before re-render to show selection
-        setTimeout(() => renderSimuladoQuestion(), 100);
-    });
-
-    if (main.querySelector('#prev-q')) (main.querySelector('#prev-q') as HTMLElement).onclick = () => {
-        simuladoState.currentQuestion--;
-        renderSimuladoQuestion();
-    };
-    if (main.querySelector('#next-q')) (main.querySelector('#next-q') as HTMLElement).onclick = () => {
-        simuladoState.currentQuestion++;
-        renderSimuladoQuestion();
-    };
-    if (main.querySelector('#finish-sim')) (main.querySelector('#finish-sim') as HTMLElement).onclick = () => {
-        finishSimulado();
-    };
-}
-
-function finishSimulado() {
-    let correct = 0;
-    const total = 30;
-    const normalize = (v: any) => String(v).trim().toUpperCase().charAt(0);
-
-    simuladoState.questions.forEach((q, index) => {
-        const userAnswer = simuladoState.answers[index];
-        const correctAnswer = q.correct;
-
-        if (userAnswer && normalize(userAnswer) === normalize(correctAnswer)) {
-            correct++;
-        } else {
-            GamificationService.recordError(q, q.subject, userAnswer);
-        }
-    });
-
-    const wrong = total - correct;
-    const percentage = (correct / total) * 100;
-
-    app.innerHTML = "";
-    app.appendChild(renderHeader("Resultado do Simulado", () => navigateTo(renderHomeScreen)));
-    const main = document.createElement('main');
-    app.appendChild(main);
-
-    main.innerHTML = `
-        <div class="admin-section" style="text-align:center; padding:2rem;">
-            <h2 style="margin-bottom:1rem;">Resultado do Simulado</h2>
-            <div style="font-size:3rem; font-weight:900; color:${percentage >= 70 ? '#4caf50' : '#f44336'}; margin-bottom:1rem;">${Math.round(percentage)}%</div>
-            <p style="font-size:1.2rem; font-weight:bold; margin-bottom:2rem;">Situação: ${percentage >= 70 ? 'APROVADO' : 'REPROVADO'}</p>
-            <div style="display:flex; justify-content:space-around; margin-bottom:2rem; background:rgba(0,0,0,0.03); padding:1rem; border-radius:15px;">
-                <div><p style="font-size:0.8rem; opacity:0.7;">Acertos</p><p style="font-size:1.5rem; font-weight:bold; color:#4caf50;">${correct}</p></div>
-                <div style="width:1px; background:rgba(0,0,0,0.1);"></div>
-                <div><p style="font-size:0.8rem; opacity:0.7;">Erros</p><p style="font-size:1.5rem; font-weight:bold; color:#f44336;">${wrong}</p></div>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:10px;">
-                <button id="go-review" class="nav-btn" style="width:100%; justify-content:center; background:var(--accent-color); color:white;">
-                    <i class="material-icons">history_edu</i> REVISAR ERROS
-                </button>
-                <button id="back-home" class="nav-btn" style="width:100%; justify-content:center; background:white; border:1px solid var(--border-color);">
-                    <i class="material-icons">home</i> VOLTAR PARA HOME
-                </button>
-            </div>
-        </div>
-    `;
-
-    main.querySelector('#go-review')!.onclick = () => renderReviewScreen();
-    main.querySelector('#back-home')!.onclick = () => navigateTo(renderHomeScreen);
-}
-
-function renderReviewScreen() {
-    app.innerHTML = "";
-    app.appendChild(renderHeader("Revisar Erros", () => navigateTo(renderHomeScreen)));
-    
-    const errors = GamificationService.getErrors();
-    const main = document.createElement('main');
-    app.appendChild(main);
-
-    if (errors.length === 0) {
-        main.innerHTML = `<div style="padding:4rem; text-align:center; opacity:0.4;"><i class="material-icons" style="font-size:4rem;">check_circle</i><p>Parabéns! Você não tem erros para revisar.</p></div>`;
-        return;
-    }
-
-    main.innerHTML = `
-        <div style="padding:1rem;">
-            <p style="margin-bottom:1.5rem; font-size:0.9rem; opacity:0.7;">Aqui estão as questões que você errou. Revise a explicação e tente novamente.</p>
-            <div id="error-list"></div>
-        </div>
-    `;
-
-    const list = main.querySelector('#error-list')!;
-    errors.forEach(q => {
-        const card = document.createElement('div');
-        card.className = "quiz-card";
-        card.style.padding = "1.5rem";
-        
-        const rawCorrect = String(q.correct || "A").trim().toUpperCase();
-        const letters = ["A", "B", "C", "D"];
-        const numbers = ["1", "2", "3", "4"];
-        let correctIdx = -1;
-        if (letters.includes(rawCorrect.charAt(0))) correctIdx = letters.indexOf(rawCorrect.charAt(0));
-        else if (numbers.includes(rawCorrect.charAt(0))) correctIdx = numbers.indexOf(rawCorrect.charAt(0));
-        
-        const correctText = q['option' + (correctIdx + 1)];
-        
-        let lastUserAnswerText = "Não respondida";
-        if (q.lastUserAnswer !== null && q.lastUserAnswer !== undefined) {
-            if (typeof q.lastUserAnswer === 'number') {
-                lastUserAnswerText = q['option' + (q.lastUserAnswer + 1)];
-            } else if (typeof q.lastUserAnswer === 'string') {
-                const idx = letters.indexOf(q.lastUserAnswer.toUpperCase());
-                if (idx > -1) lastUserAnswerText = q['option' + (idx + 1)];
-                else lastUserAnswerText = q.lastUserAnswer;
+async function askSinalVerde(prompt: string, scenario: 'chat' | 'correction' | 'incentive' | 'search' | 'explanation' = 'chat') {
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const res = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+            config: {
+                systemInstruction: SINAL_VERDE_SYSTEM_PROMPT
             }
-        }
+        });
+        return res.text;
+    } catch (err) {
+        console.error("Erro na Sinal Verde:", err);
+        return "Ops! Tive um pequeno problema no motor, mas já estou voltando para a pista. Pode repetir? 🚦";
+    }
+}
 
-        card.innerHTML = `
-            <p style="font-size:0.7rem; color:var(--accent-color); font-weight:bold; margin-bottom:5px; text-transform:uppercase;">${q.subject}</p>
-            <p style="font-weight:bold; margin-bottom:1rem;">${q.question}</p>
-            
-            <div style="margin-bottom:1rem; font-size:0.9rem;">
-                <div style="background:#ffebee; padding:0.8rem; border-radius:10px; margin-bottom:8px; border-left: 4px solid #f44336;">
-                    <p style="font-size:0.7rem; font-weight:bold; color:#c62828; text-transform:uppercase; margin-bottom:2px;">Sua Resposta Anterior:</p>
-                    <p style="color:#b71c1c;">${lastUserAnswerText}</p>
-                </div>
-                <div style="background:#e8f5e9; padding:0.8rem; border-radius:10px; border-left: 4px solid #4caf50;">
-                    <p style="font-size:0.7rem; font-weight:bold; color:#2e7d32; text-transform:uppercase; margin-bottom:2px;">Resposta Correta:</p>
-                    <p style="color:#1b5e20;">${correctText}</p>
+function toggleChatbot() {
+    let overlay = document.querySelector('.chat-overlay') as HTMLElement;
+    if (overlay) { overlay.remove(); return; }
+    overlay = document.createElement('div'); overlay.className = 'chat-overlay';
+    overlay.innerHTML = `
+    <div class="chat-container">
+        <header class="chat-header">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div class="sinal-verde-avatar-mini"></div>
+                <div>
+                    <h4 style="margin:0; font-size:1rem;">Sinal Verde</h4>
+                    <span style="font-size:0.6rem; opacity:0.8;">Sua instrutora digital</span>
                 </div>
             </div>
-
-            <div class="explanation-box" style="display:none; background:#fff3e0; padding:1rem; border-radius:12px; margin-bottom:1rem; border-left: 4px solid #ff9800; font-size:0.85rem;">
-                <p style="font-weight:bold; color:#e65100; margin-bottom:5px;">Explicação da Sinal Verde:</p>
-                <div class="explanation-text">Carregando explicação...</div>
+            <button id="close-chat"><i class="material-icons">close</i></button>
+        </header>
+        <div id="msgs" class="chat-messages">
+            <div class="chat-message ai-message">Olá! Eu sou a Sinal Verde. Como posso te ajudar a conquistar sua CNH hoje? 🚦</div>
+        </div>
+        <form id="chatf" class="chat-input-form">
+            <div class="chat-input-wrapper">
+                <textarea id="msgp" rows="1" placeholder="Tire sua dúvida..."></textarea>
+                <button type="submit" class="chat-send-btn"><i class="material-icons">send</i></button>
             </div>
+        </form>
+    </div>`;
+    document.body.appendChild(overlay);
+    
+    overlay.onclick = (e) => {
+        if (e.target === overlay) overlay.remove();
+    };
+    
+    const msgs = overlay.querySelector('#msgs')!;
+    const msgp = overlay.querySelector('#msgp') as HTMLTextAreaElement;
+    
+    (overlay.querySelector('#close-chat') as HTMLElement).onclick = () => overlay.remove();
+    (overlay.querySelector('#chatf') as HTMLFormElement).onsubmit = async (e) => {
+        e.preventDefault();
+        const v = msgp.value.trim(); if (!v) return;
+        msgp.value = '';
+        
+        msgs.innerHTML += `<div class="chat-message user-message">${v}</div>`;
+        msgs.scrollTop = msgs.scrollHeight;
 
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                <button class="nav-btn explain-btn" style="justify-content:center; background:white; border:1px solid #ddd; font-size:0.75rem;">
-                    <i class="material-icons" style="font-size:1.1rem;">psychology</i> POR QUE?
-                </button>
-                <button class="nav-btn retry-btn" style="justify-content:center; background:var(--accent-color); color:white; font-size:0.75rem;">
-                    <i class="material-icons" style="font-size:1.1rem;">refresh</i> REFAZER
-                </button>
-            </div>
-        `;
+        const loadingMsg = document.createElement('div');
+        loadingMsg.className = 'chat-message ai-message typing';
+        loadingMsg.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+        msgs.appendChild(loadingMsg);
+        msgs.scrollTop = msgs.scrollHeight;
 
-        const explainBtn = card.querySelector('.explain-btn') as HTMLElement;
-        const explanationBox = card.querySelector('.explanation-box') as HTMLElement;
-        const explanationText = card.querySelector('.explanation-text') as HTMLElement;
-
-        explainBtn.onclick = async () => {
-            explanationBox.style.display = 'block';
-            explainBtn.style.display = 'none';
-            const explanation = await SearchService.getExplanation(`Explique por que a resposta correta para a pergunta "${q.question}" é "${correctText}" no contexto de ${q.subject}.`, []);
-            explanationText.innerHTML = explanation.replace(/\n/g, '<br>');
-        };
-
-        card.querySelector('.retry-btn')!.onclick = () => {
-            card.innerHTML = `
-                <p style="font-weight:bold; margin-bottom:1.5rem;">${q.question}</p>
-                <div style="display:flex; flex-direction:column; gap:12px;">
-                    ${[1, 2, 3, 4].map(n => `<button class="quiz-option-btn nav-btn" data-idx="${n-1}">${q['option'+n]}</button>`).join('')}
-                </div>
-            `;
-            card.querySelectorAll('.quiz-option-btn').forEach(btn => btn.onclick = (e) => {
-                const idx = parseInt((e.currentTarget as HTMLElement).getAttribute('data-idx')!);
-                if (idx === correctIdx) {
-                    showToast("Correto agora! Removendo da revisão.");
-                    GamificationService.removeError(q.id);
-                    GamificationService.addPoints(5);
-                    setTimeout(() => renderReviewScreen(), 1000);
-                } else {
-                    showToast("Ainda incorreto. Tente novamente.", "error");
-                    (e.currentTarget as HTMLElement).style.background = "#f44336";
-                    (e.currentTarget as HTMLElement).style.color = "white";
-                }
-            });
-        };
-        list.appendChild(card);
-    });
+        const response = await askSinalVerde(v);
+        loadingMsg.remove();
+        
+        msgs.innerHTML += `<div class="chat-message ai-message">${response}</div>`;
+        msgs.scrollTop = msgs.scrollHeight;
+    };
 }
 
 async function init() { 
-    ThemeService.init();
-    let seedData = null;
     try {
-        seedData = await loadAllSubjects();
+        console.log("App: Iniciando inicialização...");
+        await DataService.init(INITIAL_DATA_SEED, MASTER_DISTRIBUTION_URL); 
+        console.log("App: Inicialização concluída. Navegando...");
+        
+        if (DataService.state.currentUserRole || DataService.state.currentUser) {
+            navigateTo(renderHomeScreen);
+        } else {
+            navigateTo(renderLoginScreen);
+        }
     } catch (err) {
-        console.error("Erro ao carregar matérias locais:", err);
+        console.error("Erro crítico na inicialização do App:", err);
+        app.innerHTML = `
+            <div style="padding:2rem; text-align:center; color:var(--danger-color);">
+                <i class="material-icons" style="font-size:3rem;">error_outline</i>
+                <h3>Erro ao carregar o app</h3>
+                <p style="font-size:0.8rem; margin:1rem 0;">Ocorreu um erro ao inicializar o banco de dados local.</p>
+                <div style="background:#f0f0f0; padding:10px; border-radius:8px; font-family:monospace; font-size:0.7rem; margin-bottom:1rem; text-align:left; overflow:auto;">
+                    ${err instanceof Error ? err.message : String(err)}
+                </div>
+                <button onclick="window.location.reload()" class="nav-btn" style="background:var(--accent-color); color:white; margin:0 auto; justify-content:center; width:100%;">Tentar Novamente</button>
+                <button onclick="localStorage.clear(); indexedDB.deleteDatabase('AutoEscolaDB'); window.location.reload();" class="nav-btn" style="background:#666; color:white; margin:10px auto; font-size:0.7rem; justify-content:center; width:100%;">LIMPAR TUDO (RESET)</button>
+            </div>
+        `;
     }
-    
-    await DataService.init(seedData, MASTER_DISTRIBUTION_URL); 
-
-    // Registro do Service Worker para suporte PWA/Offline
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js').catch(err => console.error('SW fail:', err));
-        });
-    }
-
-    if (DataService.state.currentUserRole || DataService.state.currentUser) navigateTo(renderHomeScreen);
-    else navigateTo(renderLoginScreen);
 }
+
+window.onerror = (msg, url, line, col, error) => {
+    console.error("Erro Global:", { msg, url, line, col, error });
+    return false;
+};
 
 init();

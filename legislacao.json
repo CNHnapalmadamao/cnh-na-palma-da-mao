@@ -1,0 +1,29 @@
+
+{
+  "subject": "Legislação de Trânsito",
+  "contentStore": {
+    "Legislação de Trânsito": {
+      "videos": [
+        { "id": "v1", "title": "Introdução ao CTB", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
+      ],
+      "material": [
+        { "id": "m1", "title": "Apostila Completa CTB", "url": "https://www.gov.br/infraestrutura/pt-br/assuntos/transito/arquivos-senatran/ctb_digital_2023.pdf" }
+      ],
+      "podcasts": [],
+      "quizz": [
+        {
+          "id": "q1",
+          "question": "Qual a validade da CNH para condutores com menos de 50 anos?",
+          "option1": "5 anos",
+          "option2": "10 anos",
+          "option3": "3 anos",
+          "option4": "15 anos",
+          "correct": "B"
+        }
+      ],
+      "flashcards": [
+        { "id": "f1", "question": "O que significa CTB?", "answer": "Código de Trânsito Brasileiro" }
+      ]
+    }
+  }
+}

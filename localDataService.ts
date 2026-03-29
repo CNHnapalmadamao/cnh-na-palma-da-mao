@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
-import { Student, ContentStore, ContentType, ContentItem, SESSION_AUTH_KEY } from "./dataService";
+import { Student, ContentStore, ContentType, ContentItem, SESSION_AUTH_KEY } from "./types";
 
 const DB_NAME = 'AutoEscolaDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'appState';
-// Senha padrão ofuscada: '19101400'
-const DEFAULT_MGR_PWD = atob('MTkxMDE0MDA=');
-const MANAGER_PASSWORD = (process.env as any).VITE_MANAGER_PASSWORD || DEFAULT_MGR_PWD;
+const MANAGER_PASSWORD = (process.env as any).VITE_MANAGER_PASSWORD || '19101400';
 
 export const LocalDataService = {
     state: {
@@ -24,10 +22,23 @@ export const LocalDataService = {
 
     async init(seedData: any = null, masterUrl: string | null = null) {
         try {
-            let localData = await this._getFromDB('mainData');
+            console.log("LocalDataService: Iniciando...");
+            let localData = await this._getFromDB('mainData').catch(() => null);
             
-            // Sincronização remota desativada para modelo 100% embutido
-            // const effectiveUrl = (localData && localData.remoteJsonUrl) ? localData.remoteJsonUrl : masterUrl;
+            const effectiveUrl = (localData && localData.remoteJsonUrl) ? localData.remoteJsonUrl : masterUrl;
+
+            if (effectiveUrl) {
+                if (localData) {
+                    // Se já temos dados, sincronizamos em background para não travar o app
+                    console.log("LocalDataService: Sincronizando em background...");
+                    this.syncFromRemote(effectiveUrl).catch(e => console.warn("Background sync failed", e));
+                } else {
+                    // Se não temos nada, precisamos sincronizar agora (bloqueante)
+                    console.log("LocalDataService: Sincronizando inicial (bloqueante)...");
+                    await this.syncFromRemote(effectiveUrl);
+                    localData = await this._getFromDB('mainData').catch(() => null);
+                }
+            }
 
             if (!localData && seedData) {
                 localData = seedData;
@@ -35,63 +46,65 @@ export const LocalDataService = {
             }
 
             if (localData) {
-                this.state.contentStore = localData.contentStore || {};
-                this.state.studentsData = localData.studentsData || [];
-                this.state.remoteJsonUrl = null; // Forçado nulo
-
-                // MESCLAGEM INTELIGENTE: Adiciona itens do seedData que não existem no banco local (baseado no ID)
-                if (seedData && seedData.contentStore) {
-                    Object.keys(seedData.contentStore).forEach(subjectKey => {
-                        if (!this.state.contentStore[subjectKey]) {
-                            this.state.contentStore[subjectKey] = seedData.contentStore[subjectKey];
-                        } else {
-                            const localSubject = this.state.contentStore[subjectKey];
-                            const seedSubject = seedData.contentStore[subjectKey];
-                            
-                            Object.keys(seedSubject).forEach(type => {
-                                const contentType = type as ContentType;
-                                if (!localSubject[contentType]) {
-                                    localSubject[contentType] = seedSubject[contentType];
-                                } else {
-                                    const localItems = localSubject[contentType] || [];
-                                    const seedItems = seedSubject[contentType] || [];
-                                    
-                                    // Adiciona itens novos ou atualiza existentes (pelo ID)
-                                    seedItems.forEach((sItem: any) => {
-                                        const existingIdx = localItems.findIndex((lItem: any) => lItem.id === sItem.id);
-                                        if (existingIdx === -1) {
-                                            localItems.push(sItem);
-                                        } else {
-                                            // Atualiza o item local com os metadados do seed (ex: novas descrições)
-                                            localItems[existingIdx] = { ...localItems[existingIdx], ...sItem };
-                                        }
-                                    });
-                                }
-                            });
-                        }
-                    });
-                    // Salva a mesclagem no DB
-                    await this.sync();
-                }
+                this.state.contentStore = (localData.contentStore && typeof localData.contentStore === 'object') ? localData.contentStore : {};
+                this.state.studentsData = Array.isArray(localData.studentsData) ? localData.studentsData : [];
+                this.state.remoteJsonUrl = localData.remoteJsonUrl || effectiveUrl || null;
+            } else {
+                this.state.contentStore = {};
+                this.state.studentsData = [];
             }
             
             const saved = sessionStorage.getItem(SESSION_AUTH_KEY);
             if (saved) {
-                const { role, userId } = JSON.parse(saved);
-                this.state.currentUserRole = role;
-                if (role === 'student' && userId) {
-                    this.state.currentUser = this.state.studentsData.find(s => s.id === userId) || null;
-                }
+                try {
+                    const { role, userId } = JSON.parse(saved);
+                    this.state.currentUserRole = role;
+                    if (role === 'student' && userId) {
+                        this.state.currentUser = this.state.studentsData.find(s => s.id === userId) || null;
+                    }
+                } catch (e) { console.warn("Erro ao ler sessão salva"); }
             }
+            console.log("LocalDataService: Pronto.");
         } catch (e) {
             console.error("LocalDataService Init Error", e);
+            throw e; // Repassa o erro para o index.tsx tratar
         }
     },
 
-    async syncFromRemote(url: string): Promise<boolean> {
-        // Funcionalidade desativada para garantir app 100% offline
-        console.warn("Sincronização remota desativada.");
-        return false;
+    async syncFromRemote(url: string) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) return;
+            const data = await response.json();
+
+            if (data.isManifest && data.parts) {
+                // Sincronização paralela das partes para ser mais rápido
+                const promises = data.parts.map(async (partUrl: string) => {
+                    try {
+                        const pr = await fetch(partUrl);
+                        if (pr.ok) {
+                            const partData = await pr.json();
+                            if (partData.subject && partData.contentStore) {
+                                const subjectKey = partData.subject;
+                                this.state.contentStore[subjectKey] = partData.contentStore[subjectKey];
+                            } else if (partData.contentStore) {
+                                Object.assign(this.state.contentStore, partData.contentStore);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Erro ao carregar parte do manifesto:", partUrl);
+                    }
+                });
+                await Promise.all(promises);
+            } else {
+                this.state.contentStore = data.contentStore || this.state.contentStore;
+            }
+            
+            this.state.remoteJsonUrl = url;
+            await this.sync();
+        } catch (e) {
+            console.warn("Falha na sincronização remota.");
+        }
     },
 
     async restoreSubjectBackup(subjectName: string, content: any): Promise<void> {
@@ -100,16 +113,24 @@ export const LocalDataService = {
     },
 
     async restoreBackup(data: any): Promise<void> {
-        if (!data || !data.contentStore) throw new Error("Backup inválido");
-        this.state.contentStore = data.contentStore;
-        this.state.studentsData = data.studentsData || this.state.studentsData;
+        if (!data || !data.contentStore) throw new Error("Backup inválido: contentStore ausente.");
+        
+        // Garantir que contentStore seja um objeto
+        this.state.contentStore = (typeof data.contentStore === 'object') ? data.contentStore : {};
+        
+        // Garantir que studentsData seja um array
+        this.state.studentsData = Array.isArray(data.studentsData) ? data.studentsData : [];
+        
         this.state.remoteJsonUrl = data.remoteJsonUrl || this.state.remoteJsonUrl;
         await this.sync();
     },
 
-    async setRemoteUrl(url: string): Promise<boolean> {
-        // Funcionalidade desativada para garantir app 100% offline
-        return false;
+    async setRemoteUrl(url: string): Promise<void> {
+        this.state.remoteJsonUrl = url;
+        if (url) {
+            await this.syncFromRemote(url);
+        }
+        await this.sync();
     },
 
     async loginManager(password: string): Promise<boolean> {
@@ -122,7 +143,7 @@ export const LocalDataService = {
         return false;
     },
 
-    async loginStudent(studentId: number): Promise<void> {
+    async loginStudent(studentId: string): Promise<void> {
         const student = this.state.studentsData.find(s => s.id === studentId);
         if (student) {
             this.state.currentUser = student;
@@ -138,10 +159,44 @@ export const LocalDataService = {
     },
 
     async createStudent(name: string): Promise<Student> {
-        const newStudent: Student = { id: Date.now(), name, studyTime: '0h', progress: {} };
+        const newStudent: Student = { 
+            id: String(Date.now()), 
+            name, 
+            studyTime: '0h', 
+            progress: {}, 
+            errors: [], 
+            points: 0 
+        };
         this.state.studentsData.push(newStudent);
         await this.sync();
         return newStudent;
+    },
+
+    async recordError(error: any): Promise<void> {
+        if (!this.state.currentUser) return;
+        if (!this.state.currentUser.errors) this.state.currentUser.errors = [];
+        
+        // Evitar duplicatas de erro para a mesma questão
+        const exists = this.state.currentUser.errors.find(e => e.id === error.id);
+        if (!exists) {
+            this.state.currentUser.errors.push({
+                ...error,
+                timestamp: Date.now()
+            });
+            await this.sync();
+        }
+    },
+
+    async removeError(errorId: string): Promise<void> {
+        if (!this.state.currentUser || !this.state.currentUser.errors) return;
+        this.state.currentUser.errors = this.state.currentUser.errors.filter(e => e.id !== errorId);
+        await this.sync();
+    },
+
+    async addPoints(points: number): Promise<void> {
+        if (!this.state.currentUser) return;
+        this.state.currentUser.points = (this.state.currentUser.points || 0) + points;
+        await this.sync();
     },
 
     async updateProgress(subjectLongName: string, contentId: string): Promise<void> {
@@ -183,7 +238,8 @@ export const LocalDataService = {
 
     calculateStorageMB(): number {
         try {
-            const bytes = encodeURI(JSON.stringify(this.state)).split(/%..|./).length - 1;
+            const str = JSON.stringify(this.state);
+            const bytes = new TextEncoder().encode(str).length;
             return bytes / 1048576;
         } catch (e) { return 0; }
     },
